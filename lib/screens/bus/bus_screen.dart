@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -48,6 +50,8 @@ class _BusScreenState extends State<BusScreen>
 
   // 高亮状态
   String? _highlightedRouteId;
+  DateTime _currentTime = DateTime.now();
+  Timer? _minuteRefreshTimer;
 
   @override
   void initState() {
@@ -55,11 +59,13 @@ class _BusScreenState extends State<BusScreen>
     _highlightedRouteId = widget.highlightRouteId;
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(_handleTabChange);
+    _scheduleMinuteRefresh();
     _loadData();
   }
 
   @override
   void dispose() {
+    _minuteRefreshTimer?.cancel();
     _tabController.removeListener(_handleTabChange);
     _scrollController.dispose();
     _tabController.dispose();
@@ -67,7 +73,27 @@ class _BusScreenState extends State<BusScreen>
   }
 
   void _handleTabChange() {
-    if (mounted) setState(() {});
+    if (mounted) setState(_updateCurrentTime);
+  }
+
+  void _scheduleMinuteRefresh() {
+    _minuteRefreshTimer?.cancel();
+
+    final now = DateTime.now();
+    final nextMinute =
+        DateTime(now.year, now.month, now.day, now.hour, now.minute + 1);
+    final delay =
+        nextMinute.difference(now) + const Duration(milliseconds: 100);
+
+    _minuteRefreshTimer = Timer(delay, () {
+      if (!mounted) return;
+      setState(_updateCurrentTime);
+      _scheduleMinuteRefresh();
+    });
+  }
+
+  void _updateCurrentTime() {
+    _currentTime = DateTime.now();
   }
 
   Future<void> _loadData() async {
@@ -136,6 +162,7 @@ class _BusScreenState extends State<BusScreen>
   Future<void> _loadShuttleData() async {
     if (!mounted) return;
     setState(() {
+      _updateCurrentTime();
       _isLoadingShuttle = true;
       _shuttleError = null;
     });
@@ -144,12 +171,14 @@ class _BusScreenState extends State<BusScreen>
       final routes = await _busService.fetchBusRoutes(BusType.campusShuttle);
       if (!mounted) return;
       setState(() {
+        _updateCurrentTime();
         _shuttleRoutes = routes;
         _isLoadingShuttle = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
+        _updateCurrentTime();
         _isLoadingShuttle = false;
         _shuttleError = e.toString();
       });
@@ -159,6 +188,7 @@ class _BusScreenState extends State<BusScreen>
   Future<void> _loadInternalData() async {
     if (!mounted) return;
     setState(() {
+      _updateCurrentTime();
       _isLoadingInternal = true;
       _internalError = null;
     });
@@ -167,12 +197,14 @@ class _BusScreenState extends State<BusScreen>
       final routes = await _busService.fetchBusRoutes(BusType.campusInternal);
       if (!mounted) return;
       setState(() {
+        _updateCurrentTime();
         _internalRoutes = routes;
         _isLoadingInternal = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
+        _updateCurrentTime();
         _isLoadingInternal = false;
         _internalError = e.toString();
       });
@@ -282,6 +314,7 @@ class _BusScreenState extends State<BusScreen>
             child: _ShuttleRouteCard(
               route: route,
               isHighlighted: isHighlighted,
+              currentTime: _currentTime,
             ),
           );
         },
@@ -335,6 +368,7 @@ class _BusScreenState extends State<BusScreen>
             child: _InternalRouteCard(
               route: route,
               isHighlighted: isHighlighted,
+              currentTime: _currentTime,
             ),
           );
         },
@@ -347,10 +381,12 @@ class _BusScreenState extends State<BusScreen>
 class _ShuttleRouteCard extends StatelessWidget {
   final BusRoute route;
   final bool isHighlighted;
+  final DateTime currentTime;
 
   const _ShuttleRouteCard({
     required this.route,
     this.isHighlighted = false,
+    required this.currentTime,
   });
 
   // 校区坐标
@@ -539,8 +575,7 @@ class _ShuttleRouteCard extends StatelessWidget {
   }
 
   BusSchedule? _getNextSchedule() {
-    final now = DateTime.now();
-    final currentMinutes = now.hour * 60 + now.minute;
+    final currentMinutes = currentTime.hour * 60 + currentTime.minute;
 
     for (final schedule in route.schedules) {
       if (schedule.departureMinutes > currentMinutes) {
@@ -583,10 +618,12 @@ class _RouteTag extends StatelessWidget {
 class _InternalRouteCard extends StatefulWidget {
   final BusRoute route;
   final bool isHighlighted;
+  final DateTime currentTime;
 
   const _InternalRouteCard({
     required this.route,
     this.isHighlighted = false,
+    required this.currentTime,
   });
 
   @override
@@ -833,8 +870,8 @@ class _InternalRouteCardState extends State<_InternalRouteCard> {
   }
 
   BusSchedule? _getNextSchedule() {
-    final now = DateTime.now();
-    final currentMinutes = now.hour * 60 + now.minute;
+    final currentMinutes =
+        widget.currentTime.hour * 60 + widget.currentTime.minute;
 
     for (final schedule in widget.route.schedules) {
       if (schedule.departureMinutes > currentMinutes) {
@@ -845,14 +882,14 @@ class _InternalRouteCardState extends State<_InternalRouteCard> {
   }
 
   bool _isPastTime(BusSchedule schedule) {
-    final now = DateTime.now();
-    final currentMinutes = now.hour * 60 + now.minute;
+    final currentMinutes =
+        widget.currentTime.hour * 60 + widget.currentTime.minute;
     return schedule.departureMinutes <= currentMinutes;
   }
 
   String _getWaitTime(BusSchedule schedule) {
-    final now = DateTime.now();
-    final currentMinutes = now.hour * 60 + now.minute;
+    final currentMinutes =
+        widget.currentTime.hour * 60 + widget.currentTime.minute;
     final waitMinutes = schedule.departureMinutes - currentMinutes;
 
     if (waitMinutes <= 0) return '即将发车';

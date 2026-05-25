@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -35,6 +37,8 @@ class _CanteenScreenState extends State<CanteenScreen>
   final CanteenService _canteenService = CanteenService();
   String _selectedCampus = 'all';
   DateTime _lastUpdated = DateTime.now();
+  DateTime _currentTime = DateTime.now();
+  Timer? _minuteRefreshTimer;
 
   final List<Map<String, String>> _campusOptions = [
     {'id': 'all', 'name': '全部'},
@@ -47,11 +51,13 @@ class _CanteenScreenState extends State<CanteenScreen>
   @override
   void initState() {
     super.initState();
+    _scheduleMinuteRefresh();
     initDataListScreen();
   }
 
   @override
   void dispose() {
+    _minuteRefreshTimer?.cancel();
     disposeDataListScreen();
     super.dispose();
   }
@@ -62,9 +68,18 @@ class _CanteenScreenState extends State<CanteenScreen>
   String? getInitialHighlightId() => widget.highlightCanteenId;
 
   @override
+  Future<void> loadData() async {
+    if (!mounted) return;
+    setState(_updateCurrentTime);
+    await super.loadData();
+    if (mounted) setState(_updateCurrentTime);
+  }
+
+  @override
   Future<List<CanteenData>> fetchData() async {
     final response = await _canteenService.fetchCanteenData();
     _lastUpdated = response.fetchedAt;
+    _updateCurrentTime();
     return response.canteens;
   }
 
@@ -108,6 +123,26 @@ class _CanteenScreenState extends State<CanteenScreen>
   }
 
   // ============ Custom UI ============
+
+  void _scheduleMinuteRefresh() {
+    _minuteRefreshTimer?.cancel();
+
+    final now = DateTime.now();
+    final nextMinute =
+        DateTime(now.year, now.month, now.day, now.hour, now.minute + 1);
+    final delay =
+        nextMinute.difference(now) + const Duration(milliseconds: 100);
+
+    _minuteRefreshTimer = Timer(delay, () {
+      if (!mounted) return;
+      setState(_updateCurrentTime);
+      _scheduleMinuteRefresh();
+    });
+  }
+
+  void _updateCurrentTime() {
+    _currentTime = DateTime.now();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -234,8 +269,7 @@ class _CanteenScreenState extends State<CanteenScreen>
   }
 
   String _formatTime(DateTime time) {
-    final now = DateTime.now();
-    final diff = now.difference(time);
+    final diff = _currentTime.difference(time);
     if (diff.inMinutes < 1) return '刚刚';
     if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';

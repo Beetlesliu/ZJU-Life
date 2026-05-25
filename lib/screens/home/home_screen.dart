@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -35,16 +37,52 @@ class _HomeScreenState extends State<HomeScreen> {
   List<CanteenData>? _canteenData;
   List<BusRoute>? _busRoutes;
   bool _isLoadingLiveData = false;
+  DateTime _currentTime = DateTime.now();
+  Timer? _minuteRefreshTimer;
 
   @override
   void initState() {
     super.initState();
+    _scheduleMinuteRefresh();
     _loadLiveData();
   }
 
+  @override
+  void dispose() {
+    _minuteRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleMinuteRefresh() {
+    _minuteRefreshTimer?.cancel();
+
+    final now = DateTime.now();
+    final nextMinute =
+        DateTime(now.year, now.month, now.day, now.hour, now.minute + 1);
+    final delay =
+        nextMinute.difference(now) + const Duration(milliseconds: 100);
+
+    _minuteRefreshTimer = Timer(delay, () {
+      if (!mounted) return;
+      setState(_updateCurrentTime);
+      _scheduleMinuteRefresh();
+    });
+  }
+
+  void _updateCurrentTime() {
+    _currentTime = DateTime.now();
+  }
+
   Future<void> _loadLiveData() async {
-    if (_isLoadingLiveData) return;
-    setState(() => _isLoadingLiveData = true);
+    if (_isLoadingLiveData) {
+      setState(_updateCurrentTime);
+      return;
+    }
+
+    setState(() {
+      _updateCurrentTime();
+      _isLoadingLiveData = true;
+    });
 
     try {
       // 并行加载食堂和班车数据
@@ -60,6 +98,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (mounted) {
         setState(() {
+          _updateCurrentTime();
           _canteenData = results[0] as List<CanteenData>;
           _busRoutes = results[1] as List<BusRoute>;
         });
@@ -68,7 +107,10 @@ class _HomeScreenState extends State<HomeScreen> {
       // 静默失败
     } finally {
       if (mounted) {
-        setState(() => _isLoadingLiveData = false);
+        setState(() {
+          _updateCurrentTime();
+          _isLoadingLiveData = false;
+        });
       }
     }
   }
@@ -138,9 +180,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildHeader(AuthProvider auth, CampusProvider campus) {
-    final now = DateTime.now();
-    final greeting = _getGreeting(now.hour);
-    final dateStr = DateFormat('M月d日 EEEE', 'zh_CN').format(now);
+    final greeting = _getGreeting(_currentTime.hour);
+    final dateStr = DateFormat('M月d日 EEEE', 'zh_CN').format(_currentTime);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -375,6 +416,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   item: item,
                   canteenData: _canteenData,
                   busRoutes: _busRoutes,
+                  currentTime: _currentTime,
                   onTap: () => _navigateToFavorite(item),
                 ),
               )
@@ -480,12 +522,14 @@ class _LiveFavoriteCard extends StatelessWidget {
   final FavoriteItem item;
   final List<CanteenData>? canteenData;
   final List<BusRoute>? busRoutes;
+  final DateTime currentTime;
   final VoidCallback? onTap;
 
   const _LiveFavoriteCard({
     required this.item,
     this.canteenData,
     this.busRoutes,
+    required this.currentTime,
     this.onTap,
   });
 
@@ -623,8 +667,7 @@ class _LiveFavoriteCard extends StatelessWidget {
     if (route == null) return null;
 
     // 获取下一班车
-    final now = DateTime.now();
-    final currentMinutes = now.hour * 60 + now.minute;
+    final currentMinutes = currentTime.hour * 60 + currentTime.minute;
 
     BusSchedule? nextBus;
     for (final schedule in route.schedules) {
